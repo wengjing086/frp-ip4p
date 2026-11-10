@@ -70,7 +70,7 @@ localIP   = "127.0.0.1"
 localPort = 3389
 ```
 
-启动：`frpc.exe -c frpc.toml`
+启动：`frpc_windows_amd64.exe -c frpc.toml`（Windows 下可自行重命名为 `frpc.exe` 方便使用）
 
 > 排查：用 `nslookup -type=TXT your.ip4p.example.com` 确认 TXT 记录存在且未被 DNS 服务器过滤；
 > 用 `base64 -d` 解码记录值，应得到 `IP:端口`。无 IP4P 记录时按普通模式连接，无需额外配置。
@@ -81,7 +81,7 @@ localPort = 3389
 
 | 平台 | 资产文件名 |
 | --- | --- |
-| Windows x64 / ARM64 / x86 | `frpc_windows_amd64.exe`（也提供兼容名 `frpc.exe`）、`frpc_windows_arm64.exe`、`frpc_windows_386.exe` |
+| Windows x64 / ARM64 / x86 | `frpc_windows_amd64.exe`、`frpc_windows_arm64.exe`、`frpc_windows_386.exe` |
 | Linux x86_64 / ARM64 / ARMv7 / x86 | `frpc_linux_amd64`、`frpc_linux_arm64`、`frpc_linux_arm`、`frpc_linux_386` |
 | Linux MIPS（路由器，含大端/小端） | `frpc_linux_mipsle`、`frpc_linux_mips`、`frpc_linux_mips64le`、`frpc_linux_mips64` |
 | Linux RISC-V 64 / 龙芯 LoongArch64 | `frpc_linux_riscv64`、`frpc_linux_loong64` |

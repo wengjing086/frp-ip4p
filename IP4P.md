@@ -74,7 +74,7 @@ go build -tags "frpc,noweb" -trimpath -ldflags="-s -w" -o bin/frpc.exe ./cmd/frp
 
 - 标签 `frpc` 仅编译客户端相关代码；`noweb` 用于跳过内置 Web 资源（管理员页面）的嵌入，
   避免缺少前端构建产物时编译报错。如需带 Web 资源，请先按官方流程 `make web` 生成 `web/frpc/dist`。
-- 编译产物的版本号执行 `frpc.exe --version` 查看，应为 `0.72.0`。
+- 编译产物的版本号执行 `frpc_windows_amd64.exe --version` 查看，应为 `0.72.0`。
 
 ### 3.3 交叉编译其他平台
 
@@ -123,7 +123,7 @@ localIP   = "127.0.0.1"
 localPort = 3389
 ```
 
-启动：`frpc.exe -c frpc.toml`
+启动：`frpc_windows_amd64.exe -c frpc.toml`（Windows 下可自行重命名为 `frpc.exe` 方便使用）
 
 > `dnsServer` 会接管 Go 的 `net.DefaultResolver`，因此 TXT 查询也会走它。
 > 若 TXT 查询失败，请确认该 DNS 服务器**没有过滤 TXT 记录**，并可用
