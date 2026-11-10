@@ -124,7 +124,7 @@ func (c *defaultConnectorImpl) Open() error {
 		}
 		tlsConfig.NextProtos = []string{"frp"}
 
-		serverAddr, serverPort := lookupIP4P(c.cfg.ServerAddr, c.cfg.ServerPort)
+		serverAddr, serverPort := lookupIP4P(c.ctx, c.cfg.ServerAddr, c.cfg.ServerPort)
 		conn, err := quic.DialAddr(
 			c.ctx,
 			net.JoinHostPort(serverAddr, strconv.Itoa(serverPort)),
@@ -245,7 +245,7 @@ func (c *defaultConnectorImpl) realConnect() (net.Conn, error) {
 		libnet.WithProxy(proxyType, addr),
 		libnet.WithProxyAuth(auth),
 	)
-	serverAddr, serverPort := lookupIP4P(c.cfg.ServerAddr, c.cfg.ServerPort)
+	serverAddr, serverPort := lookupIP4P(c.ctx, c.cfg.ServerAddr, c.cfg.ServerPort)
 	conn, err := libnet.DialContext(
 		c.ctx,
 		net.JoinHostPort(serverAddr, strconv.Itoa(serverPort)),

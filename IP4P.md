@@ -3,29 +3,45 @@
 本项目基于官方 [fatedier/frp](https://github.com/fatedier/frp) **v0.72.0** 源码，
 在**客户端（frpc）** 上新增了 **IP4P 地址解析** 支持，其余功能与官方 v0.72.0 完全一致。
 
-> 这是一次**最小化、可溯源**的二次开发：只新增了 1 个文件、改动客户端拨号路径的 2 处调用，
-> 协议、配置格式、鉴权、加密等核心逻辑均未改动。本分支**没有**对二进制做反检测/免杀改造，
-> 成品即是标准 frp 客户端，便于审计与自行编译。
+> 这是一次**最小化、可溯源**的二次开发：只新增了 `client/ip4p.go`（含单元测试）、
+> 改动客户端拨号路径的 2 处调用，协议、配置格式、鉴权、加密等核心逻辑均未改动。
+> 本分支**没有**对二进制做反检测/免杀改造，成品即是标准 frp 客户端，便于审计与自行编译。
 
 ---
 
 ## 1. 什么是 IP4P
 
-IP4P（IP for P2P）是一种把 **IPv4 地址 + 端口** 编码进 **IPv6 地址** 的表示方式，
-前缀为 `2001:0000::/16`。常用于 P2P / NAT 穿透场景：当一个对端（peer）没有公网 IPv4，
-但可以通过某种方式通告一个 IPv6 形式的 "IPv4:端口" 时，客户端在连接前把它解码回真实的
-IPv4 与端口即可直连。
+IP4P（IP for P2P）用于在 NAT 穿透 / P2P 场景下，把**动态变化的公网 IPv4 地址 + 端口**
+通告给客户端。frps 位于 NAT 之后，公网映射地址/端口由 STUN / natmap / lucky 等工具探测后
+写入 DNS，frpc 启动时自动查出真实的 `IP:端口` 再连接，因此 `serverAddr` 填一个域名即可，
+**不需要静态公网 IP，也不需要固定端口**。
 
-在本分支中，`server_addr` 既可以填普通域名 / IPv4，也可以填一个 **IP4P 编码的 IPv6 地址**。
-客户端在发起连接（TCP / WebSocket / QUIC 三种传输方式）前会自动做一次解码：
+本分支按以下**顺序尝试三种解析方式**，命中即返回：
+
+| 优先级 | 方式 | 记录内容 | 说明 |
+| --- | --- | --- | --- |
+| 1 | **TXT 记录** | `base64("IPv4:端口")`，例如 `MjAzLjAuMTEzLjc6MTgyNDY=` 解码为 `203.0.113.7:18246` | natmap / lucky / DDNS 类部署的常用方式，也兼容明文 `IPv4:端口` |
+| 2 | **AAAA 记录** | IP4P 编码的 IPv6 地址（`2001:0000::/16` 前缀，端口在字节 10-11，IPv4 在字节 12-15） | hevz/frp 原始 IP4P 方案 |
+| 3 | 普通模式 | 无匹配记录 | 原样使用 `serverAddr` + `serverPort`，行为与官方 frp 完全相同 |
+
+**关键点：解析成功后，记录里的端口会覆盖配置中的 `serverPort`。**
+所以使用 IP4P 时配置文件里**可以不写 `serverPort`**（写了也会被覆盖），这是预期行为。
+
+例如域名 `your.ip4p.example.com` 的 TXT 记录为 `MjAzLjAuMTEzLjc6MTgyNDY=`：
 
 ```
-2001:0000::IPv4:PORT  ──解码──▶  IPv4 地址 + 端口
+TXT: MjAzLjAuMTEzLjc6MTgyNDY=
+  └─ Base64 解码 ─▶ 203.0.113.7:18246
+                      └─ frpc 实际连接 203.0.113.7 的 18246 端口
 ```
 
-如果 `server_addr` 不是 IP4P 地址，则原样连接，行为与普通 frp 完全相同。
+客户端日志里会打印解析结果，便于排查：
 
-解码逻辑位于新增文件 [`client/ip4p.go`](client/ip4p.go) 的 `lookupIP4P()`，
+```
+[I] ip4p: resolved server address from TXT record, your.ip4p.example.com -> 203.0.113.7:18246
+```
+
+解析逻辑位于新增文件 [`client/ip4p.go`](client/ip4p.go) 的 `lookupIP4P()`，
 并在 [`client/connector.go`](client/connector.go) 的 QUIC 与 TCP/WS 两条拨号路径中被调用。
 
 ---
@@ -34,8 +50,9 @@ IPv4 与端口即可直连。
 
 | 文件 | 改动 |
 | --- | --- |
-| `client/ip4p.go` | **新增**：`lookupIP4P(addr, port)` 解码 IP4P 地址 |
+| `client/ip4p.go` | **新增**：`lookupIP4P(ctx, addr, port)`，支持 TXT(Base64/明文) 与 AAAA(IP4P IPv6) 两级解析，失败回退普通模式 |
 | `client/connector.go` | QUIC 拨号处、TCP/WS 拨号处各插入一次 `lookupIP4P` 解析 `server_addr` |
+| `client/ip4p_test.go` | **新增**：TXT 解析与回退行为的单元测试 |
 
 服务端（frps）**不需要任何改动**，使用官方 v0.72.0 的 frps 即可。
 
@@ -66,6 +83,10 @@ go build -tags "frpc,noweb" -trimpath -ldflags="-s -w" -o bin/frpc.exe ./cmd/frp
 GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 \
   go build -tags "frpc,noweb" -trimpath -ldflags="-s -w" -o bin/frpc_linux_amd64 ./cmd/frpc/
 
+# Linux arm64
+GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 \
+  go build -tags "frpc,noweb" -trimpath -ldflags="-s -w" -o bin/frpc_linux_arm64 ./cmd/frpc/
+
 # macOS arm64
 GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 \
   go build -tags "frpc,noweb" -trimpath -ldflags="-s -w" -o bin/frpc_darwin_arm64 ./cmd/frpc/
@@ -75,17 +96,45 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
   go build -tags "frps,noweb" -trimpath -ldflags="-s -w" -o bin/frps_linux_amd64 ./cmd/frps/
 ```
 
+> 说明：Git Bash 下请勿用 `env GOOS=... go build` 前缀形式（在 Windows 上可能静默不产出文件），
+> 直接用 `GOOS=... GOARCH=... go build` 前置赋值即可。
+
 ---
 
 ## 4. 配置示例
 
-### 4.1 客户端 `frpc.toml`
+### 4.1 使用 IP4P（TXT 记录）的客户端 `frpc.toml`
 
 ```toml
-serverAddr = "your.frps.example.com"   # 也可填 IP4P 编码的 IPv6 地址
-serverPort = 7000
+serverAddr = "your.ip4p.example.com"   # 该域名的 TXT 记录存 base64("公网IP:端口")
+# serverPort 可不写：解析出的端口会自动覆盖默认值
 
-# 鉴权令牌，需与服务端一致
+auth.method = "token"
+auth.token  = "请把这里换成你自己的强令牌"
+
+# 如需指定 DNS 服务器（例如本机 AdGuard Home / 内网 DNS）
+# dnsServer = "192.168.1.1:53"
+
+[[proxies]]
+name      = "jl2"
+type      = "stcp"
+secretKey = "请把这里换成你自己的密钥"
+localIP   = "127.0.0.1"
+localPort = 3389
+```
+
+启动：`frpc.exe -c frpc.toml`
+
+> `dnsServer` 会接管 Go 的 `net.DefaultResolver`，因此 TXT 查询也会走它。
+> 若 TXT 查询失败，请确认该 DNS 服务器**没有过滤 TXT 记录**，并可用
+> `nslookup -type=TXT your.ip4p.example.com` 自查。
+> 用 `base64 -d` 或在线工具解码 TXT 值，应得到形如 `IP:端口` 的字符串。
+
+### 4.2 普通模式（无 IP4P 记录，等价官方行为）
+
+```toml
+serverAddr = "your.frps.example.com"
+serverPort = 7000
 auth.token = "请把这里换成你自己的强令牌"
 
 [[proxies]]
@@ -96,9 +145,7 @@ localPort = 22
 remotePort = 6000
 ```
 
-启动：`frpc.exe -c frpc.toml`
-
-### 4.2 服务端 `frps.toml`（用官方 v0.72.0 的 frps）
+### 4.3 服务端 `frps.toml`（用官方 v0.72.0 的 frps）
 
 ```toml
 bindPort = 7000
@@ -133,6 +180,7 @@ frp 是合法的开源内网穿透工具，但部分杀毒软件会基于**特�
 
 - 整体基于 [fatedier/frp](https://github.com/fatedier/frp) v0.72.0，遵循 **Apache License 2.0**。
 - IP4P 地址解码实现移植自 [hevz/frp](https://github.com/hevz/frp)（ip4p 分支），该文件保留原作者版权声明（Apache 2.0）。
+- TXT 记录解析方式参考 [qaz741wsd856/frp](https://github.com/qaz741wsd856/frp)。
 - 使用、修改、再分发请遵守 Apache 2.0 许可证，并保留相应版权与许可声明。
 
 ---
